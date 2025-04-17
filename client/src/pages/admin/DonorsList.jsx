@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getAllDonors, updateDonorStatus } from '../../services/localStorageService';
+import axios from 'axios';
+
+const API_URL = 'http://localhost:5000/api';
 
 const DonorsList = () => {
   const [donors, setDonors] = useState([]);
@@ -10,12 +12,33 @@ const DonorsList = () => {
     searchTerm: ''
   });
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [loading, setLoading] = useState(true);
 
   // Load donors when component mounts
   useEffect(() => {
-    const loadedDonors = getAllDonors();
-    setDonors(loadedDonors);
-    setFilteredDonors(loadedDonors);
+    const fetchDonors = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('Not authenticated');
+        }
+
+        const headers = { Authorization: `Bearer ${token}` };
+        const response = await axios.get(`${API_URL}/donors`, { headers });
+        
+        setDonors(response.data);
+        setFilteredDonors(response.data);
+        setLoading(false);
+      } catch (error) {
+        setMessage({ 
+          text: error.response?.data?.message || 'Failed to load donors', 
+          type: 'error' 
+        });
+        setLoading(false);
+      }
+    };
+
+    fetchDonors();
   }, []);
 
   // Apply filters when donors or filters change
@@ -55,13 +78,23 @@ const DonorsList = () => {
 
   const handleStatusChange = async (donorId, newStatus) => {
     try {
-      // Update donor status
-      updateDonorStatus(donorId, newStatus);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Update donor status via API
+      await axios.patch(`${API_URL}/donors/${donorId}/status`, 
+        { status: newStatus },
+        { headers }
+      );
       
       // Update local state
       setDonors(prevDonors => 
         prevDonors.map(donor => 
-          donor.id === donorId ? { ...donor, status: newStatus } : donor
+          donor._id === donorId ? { ...donor, status: newStatus } : donor
         )
       );
       
@@ -74,11 +107,21 @@ const DonorsList = () => {
       setTimeout(() => setMessage({ text: '', type: '' }), 3000);
     } catch (error) {
       setMessage({ 
-        text: 'Failed to update donor status', 
+        text: error.response?.data?.message || 'Failed to update donor status', 
         type: 'error' 
       });
     }
   };
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-700"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -166,7 +209,7 @@ const DonorsList = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredDonors.length > 0 ? (
                 filteredDonors.map((donor) => (
-                  <tr key={donor.id}>
+                  <tr key={donor._id}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
                         {donor.firstName} {donor.lastName}
@@ -204,13 +247,13 @@ const DonorsList = () => {
                         {donor.status === 'pending' && (
                           <>
                             <button
-                              onClick={() => handleStatusChange(donor.id, 'approved')}
+                              onClick={() => handleStatusChange(donor._id, 'approved')}
                               className="text-green-600 hover:text-green-900"
                             >
                               Approve
                             </button>
                             <button
-                              onClick={() => handleStatusChange(donor.id, 'rejected')}
+                              onClick={() => handleStatusChange(donor._id, 'rejected')}
                               className="text-red-600 hover:text-red-900"
                             >
                               Reject
@@ -219,7 +262,7 @@ const DonorsList = () => {
                         )}
                         {donor.status === 'approved' && (
                           <button
-                            onClick={() => handleStatusChange(donor.id, 'pending')}
+                            onClick={() => handleStatusChange(donor._id, 'pending')}
                             className="text-yellow-600 hover:text-yellow-900"
                           >
                             Mark Pending
@@ -227,7 +270,7 @@ const DonorsList = () => {
                         )}
                         {donor.status === 'rejected' && (
                           <button
-                            onClick={() => handleStatusChange(donor.id, 'pending')}
+                            onClick={() => handleStatusChange(donor._id, 'pending')}
                             className="text-yellow-600 hover:text-yellow-900"
                           >
                             Review Again

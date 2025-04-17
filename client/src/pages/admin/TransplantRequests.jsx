@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { getAllRequests, updateRequestStatus, getAllDonors } from '../../services/localStorageService';
+import axios from 'axios';
+
+const API_URL = 'http://localhost:5000/api';
 
 const TransplantRequests = () => {
   const [requests, setRequests] = useState([]);
@@ -14,14 +16,39 @@ const TransplantRequests = () => {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [matchOpen, setMatchOpen] = useState(false);
   const [message, setMessage] = useState({ text: '', type: '' });
+  const [loading, setLoading] = useState(true);
 
   // Load requests and donors when component mounts
   useEffect(() => {
-    const loadedRequests = getAllRequests();
-    const loadedDonors = getAllDonors();
-    setRequests(loadedRequests);
-    setFilteredRequests(loadedRequests);
-    setDonors(loadedDonors);
+    const fetchData = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('Not authenticated');
+        }
+
+        const headers = { Authorization: `Bearer ${token}` };
+
+        // Fetch all requests
+        const requestsResponse = await axios.get(`${API_URL}/requests`, { headers });
+        setRequests(requestsResponse.data);
+        setFilteredRequests(requestsResponse.data);
+
+        // Fetch all donors
+        const donorsResponse = await axios.get(`${API_URL}/donors`, { headers });
+        setDonors(donorsResponse.data);
+
+        setLoading(false);
+      } catch (error) {
+        setMessage({ 
+          text: error.response?.data?.message || 'Failed to load data', 
+          type: 'error' 
+        });
+        setLoading(false);
+      }
+    };
+
+    fetchData();
   }, []);
 
   // Apply filters when requests or filters change
@@ -66,13 +93,23 @@ const TransplantRequests = () => {
 
   const handleStatusChange = async (requestId, newStatus) => {
     try {
-      // Update request status
-      updateRequestStatus(requestId, newStatus);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const headers = { Authorization: `Bearer ${token}` };
+
+      // Update request status via API
+      await axios.patch(`${API_URL}/requests/${requestId}/status`, 
+        { status: newStatus },
+        { headers }
+      );
       
       // Update local state
       setRequests(prevRequests => 
         prevRequests.map(request => 
-          request.id === requestId ? { ...request, status: newStatus } : request
+          request._id === requestId ? { ...request, status: newStatus } : request
         )
       );
       
@@ -90,7 +127,7 @@ const TransplantRequests = () => {
       setTimeout(() => setMessage({ text: '', type: '' }), 3000);
     } catch (error) {
       setMessage({ 
-        text: 'Failed to update request status', 
+        text: error.response?.data?.message || 'Failed to update request status', 
         type: 'error' 
       });
     }
@@ -131,6 +168,16 @@ const TransplantRequests = () => {
     
     return true;
   }) : [];
+
+  if (loading) {
+    return (
+      <div className="p-6">
+        <div className="flex justify-center items-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-700"></div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6">
@@ -235,7 +282,7 @@ const TransplantRequests = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {filteredRequests.length > 0 ? (
                 filteredRequests.map((request) => (
-                  <tr key={request.id}>
+                  <tr key={request._id}>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-gray-900">
                         {request.patientFirstName} {request.patientLastName}
@@ -253,11 +300,11 @@ const TransplantRequests = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm text-gray-900 capitalize">
                         {request.requestType === 'blood' ? 'Blood' : 
-                         `Organ (${request.organNeeded})`}
+                         request.requestType === 'organ' ? `Organ (${request.organNeeded})` : ''}
                       </div>
-                      {request.patientBloodType && (
+                      {request.hospital && (
                         <div className="text-xs text-gray-500">
-                          Blood Type: {request.patientBloodType}
+                          {request.hospital.name}
                         </div>
                       )}
                     </td>
@@ -271,44 +318,51 @@ const TransplantRequests = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full
-                        ${request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' : 
-                         request.status === 'matched' ? 'bg-blue-100 text-blue-800' : 
-                         request.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                        ${request.status === 'matched' ? 'bg-green-100 text-green-800' : 
+                         request.status === 'rejected' ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800'}`}>
                         {request.status}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                      {request.status === 'pending' && (
+                      <div className="flex space-x-2">
+                        {request.status === 'pending' && (
+                          <>
+                            <button
+                              onClick={() => handleStatusChange(request._id, 'matched')}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              Match
+                            </button>
+                            <button
+                              onClick={() => handleStatusChange(request._id, 'rejected')}
+                              className="text-red-600 hover:text-red-900"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {request.status === 'matched' && (
+                          <button
+                            onClick={() => handleStatusChange(request._id, 'completed')}
+                            className="text-blue-600 hover:text-blue-900"
+                          >
+                            Mark Completed
+                          </button>
+                        )}
                         <button
                           onClick={() => openMatchModal(request)}
-                          className="text-blue-600 hover:text-blue-900 mr-2"
+                          className="text-purple-600 hover:text-purple-900"
                         >
-                          Find Match
+                          View Details
                         </button>
-                      )}
-                      {request.status !== 'rejected' && request.status !== 'completed' && (
-                        <button
-                          onClick={() => handleStatusChange(request.id, 'completed')}
-                          className="text-green-600 hover:text-green-900 mr-2"
-                        >
-                          Complete
-                        </button>
-                      )}
-                      {request.status !== 'rejected' && (
-                        <button
-                          onClick={() => handleStatusChange(request.id, 'rejected')}
-                          className="text-red-600 hover:text-red-900"
-                        >
-                          Reject
-                        </button>
-                      )}
+                      </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-500">
-                    No requests found matching the current filters.
+                  <td colSpan="6" className="px-6 py-4 text-center text-gray-500">
+                    No requests found matching the criteria
                   </td>
                 </tr>
               )}
@@ -316,13 +370,13 @@ const TransplantRequests = () => {
           </table>
         </div>
       </div>
-      
-      {/* Match Donor Modal */}
+
+      {/* Match Modal */}
       {matchOpen && selectedRequest && (
-        <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-10">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-2xl max-h-screen overflow-y-auto">
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full">
+          <div className="relative top-20 mx-auto p-5 border w-4/5 shadow-lg rounded-md bg-white">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-medium">Find Matching Donor</h2>
+              <h3 className="text-lg font-medium">Request Details</h3>
               <button
                 onClick={() => setMatchOpen(false)}
                 className="text-gray-400 hover:text-gray-500"
@@ -334,66 +388,124 @@ const TransplantRequests = () => {
               </button>
             </div>
             
-            <div className="mb-4">
-              <h3 className="font-medium mb-2">Request Details:</h3>
-              <p><span className="font-medium">Patient:</span> {selectedRequest.patientFirstName} {selectedRequest.patientLastName}</p>
-              <p><span className="font-medium">Type:</span> {selectedRequest.requestType === 'blood' ? 'Blood' : `Organ (${selectedRequest.organNeeded})`}</p>
-              {selectedRequest.patientBloodType && (
-                <p><span className="font-medium">Blood Type:</span> {selectedRequest.patientBloodType}</p>
-              )}
-              <p><span className="font-medium">Urgency:</span> {selectedRequest.urgencyLevel}</p>
+            <div className="mb-6">
+              <h4 className="font-medium mb-2">Patient Information</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">Name</p>
+                  <p className="font-medium">
+                    {selectedRequest.patientFirstName} {selectedRequest.patientLastName}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Age</p>
+                  <p className="font-medium">{selectedRequest.patientAge}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Blood Type</p>
+                  <p className="font-medium">{selectedRequest.patientBloodType}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Contact</p>
+                  <p className="font-medium">{selectedRequest.contactPhone}</p>
+                </div>
+              </div>
             </div>
             
-            <h3 className="font-medium mb-2">Compatible Donors:</h3>
-            {compatibleDonors.length > 0 ? (
-              <div className="border rounded-md overflow-hidden">
-                <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Details</th>
-                      <th scope="col" className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                    {compatibleDonors.map(donor => (
-                      <tr key={donor.id}>
-                        <td className="px-4 py-2 whitespace-nowrap">
-                          <div className="text-sm font-medium text-gray-900">{donor.firstName} {donor.lastName}</div>
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap">
-                          <div className="text-sm text-gray-900">
-                            {donor.bloodType && <span>Blood: {donor.bloodType}</span>}
-                            {donor.organType && <span>Organ: {donor.organType}</span>}
-                          </div>
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-sm font-medium">
-                          <button
-                            onClick={() => {
-                              // Update the request status to matched
-                              handleStatusChange(selectedRequest.id, 'matched');
-                              // In a real app, you would also update the donor status and create a match record
-                            }}
-                            className="text-blue-600 hover:text-blue-900"
-                          >
-                            Select
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div className="mb-6">
+              <h4 className="font-medium mb-2">Hospital Information</h4>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-sm text-gray-600">Name</p>
+                  <p className="font-medium">{selectedRequest.hospital.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Address</p>
+                  <p className="font-medium">{selectedRequest.hospital.address}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Contact</p>
+                  <p className="font-medium">{selectedRequest.hospital.contact}</p>
+                </div>
               </div>
-            ) : (
-              <p className="text-gray-500">No compatible donors found.</p>
-            )}
+            </div>
             
-            <div className="mt-4 flex justify-end">
+            <div className="mb-6">
+              <h4 className="font-medium mb-2">Medical Details</h4>
+              <div>
+                <p className="text-sm text-gray-600">Diagnosis</p>
+                <p className="font-medium">{selectedRequest.medicalDetails.diagnosis}</p>
+              </div>
+              <div className="mt-2">
+                <p className="text-sm text-gray-600">Additional Notes</p>
+                <p className="font-medium">{selectedRequest.medicalDetails.additionalNotes}</p>
+              </div>
+            </div>
+            
+            <div className="mb-6">
+              <h4 className="font-medium mb-2">Compatible Donors</h4>
+              {compatibleDonors.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Name
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Blood Type
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Organs
+                        </th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {compatibleDonors.map((donor) => (
+                        <tr key={donor._id}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm font-medium text-gray-900">
+                              {donor.firstName} {donor.lastName}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">{donor.bloodType}</div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="text-sm text-gray-900">
+                              {donor.organType || 'Not specified'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button
+                              onClick={() => {
+                                handleStatusChange(selectedRequest._id, 'matched');
+                                // Here you would typically update the donor's status as well
+                              }}
+                              className="text-green-600 hover:text-green-900"
+                            >
+                              Match
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-gray-500">No compatible donors found</p>
+              )}
+            </div>
+            
+            <div className="flex justify-end space-x-3">
               <button
                 onClick={() => setMatchOpen(false)}
-                className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
+                className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300"
               >
-                Cancel
+                Close
               </button>
             </div>
           </div>

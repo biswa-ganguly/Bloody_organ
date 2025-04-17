@@ -2,7 +2,8 @@ const KEYS = {
     DONORS: 'donors',
     REQUESTS: 'transplantRequests',
     USERS: 'users',
-    CURRENT_USER: 'currentUser'
+    CURRENT_USER: 'current_user',
+    AUTH_TOKEN: 'auth_token'
   };
   
   // Initialize default data if not exists
@@ -94,24 +95,106 @@ const KEYS = {
   };
   
   // User related functions
-  export const authenticateUser = (username, password) => {
-    const users = JSON.parse(localStorage.getItem(KEYS.USERS)) || [];
-    const user = users.find(u => u.username === username && u.password === password);
-    
-    if (user) {
-      // Store the current user in localStorage (without password in a real app)
-      const { password, ...userWithoutPassword } = user;
-      localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(userWithoutPassword));
+  export const authenticateUser = async (email, password) => {
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Authentication failed');
+      }
+
+      const data = await response.json();
+      
+      // Store the token and user data
+      setToken(data.token);
+      setCurrentUser(data.user);
+      
+      return data.user;
+    } catch (error) {
+      console.error('Authentication error:', error);
+      throw error;
     }
-    
-    return user;
   };
   
+  export const registerUser = async (userData) => {
+    try {
+      const response = await fetch('http://localhost:5000/api/auth/register', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(userData),
+      });
+
+      if (!response.ok) {
+        throw new Error('Registration failed');
+      }
+
+      const data = await response.json();
+      
+      // Store the token and user data
+      setToken(data.token);
+      setCurrentUser(data.user);
+      
+      return data.user;
+    } catch (error) {
+      console.error('Registration error:', error);
+      throw error;
+    }
+  };
+  
+  // Auth related functions
+  export const setToken = (token) => {
+    localStorage.setItem(KEYS.AUTH_TOKEN, token);
+  };
+
+  export const getToken = () => {
+    return localStorage.getItem(KEYS.AUTH_TOKEN);
+  };
+
+  export const removeToken = () => {
+    localStorage.removeItem(KEYS.AUTH_TOKEN);
+  };
+
+  export const setCurrentUser = (user) => {
+    localStorage.setItem(KEYS.CURRENT_USER, JSON.stringify(user));
+  };
+
   export const getCurrentUser = () => {
-    return JSON.parse(localStorage.getItem(KEYS.CURRENT_USER));
+    try {
+      const userStr = localStorage.getItem(KEYS.CURRENT_USER);
+      return userStr ? JSON.parse(userStr) : null;
+    } catch (error) {
+      console.error('Error parsing user data:', error);
+      return null;
+    }
+  };
+
+  export const removeCurrentUser = () => {
+    localStorage.removeItem(KEYS.CURRENT_USER);
+  };
+
+  export const isAuthenticated = () => {
+    return !!getToken();
+  };
+
+  export const clearAuth = () => {
+    removeToken();
+    removeCurrentUser();
+  };
+
+  export const getUserRole = () => {
+    const user = getCurrentUser();
+    return user ? user.role : null;
   };
   
   export const logout = () => {
-    localStorage.removeItem(KEYS.CURRENT_USER);
+    clearAuth();
   };
   
